@@ -40,7 +40,7 @@ def evaluate_budget_status(
         over_amount = updated_spent
     else:
         usage_ratio = round(updated_spent / monthly_budget, 4)
-        if usage_ratio > 1.0:
+        if usage_ratio > 10.0:
             status = "EXCEEDED"
             over_amount = round(updated_spent - monthly_budget, 2)
         elif usage_ratio >= warning_ratio:
