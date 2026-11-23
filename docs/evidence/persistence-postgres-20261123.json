@@ -1,0 +1,126 @@
+{
+  "check": "Same Render PostgreSQL instance across two Web Service deployments",
+  "provider": "Render",
+  "region": "virginia",
+  "compute_plan": "free",
+  "postgres_version": 16,
+  "sqlite_before_binding": {
+    "database": "sqlite",
+    "row_count": 0,
+    "checked_at": "2026-11-23T11:47:41.757426+00:00"
+  },
+  "before_redeploy": {
+    "deploy_id": "dep-dc22fpmc6qcc73c7jjog",
+    "verified_at": "2026-11-23T11:49:33.396792+00:00",
+    "record": {
+      "id": 1,
+      "category": "Food",
+      "amount": 12.34,
+      "alert_status": "NORMAL",
+      "created_at": "2026-11-23T11:49:27.159370+00:00",
+      "note_sha256": "fae114e827480fb9d6ff4c0a1efab406e0ba7df36591aa092bdcfdcb177c4987"
+    },
+    "utc_month": "2026-11",
+    "summary": [
+      {
+        "category": "Daily",
+        "total_spent": 0.0,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0,
+        "status": "NORMAL"
+      },
+      {
+        "category": "Entertainment",
+        "total_spent": 0.0,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0,
+        "status": "NORMAL"
+      },
+      {
+        "category": "Food",
+        "total_spent": 12.34,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0082,
+        "status": "NORMAL"
+      },
+      {
+        "category": "Other",
+        "total_spent": 0.0,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0,
+        "status": "NORMAL"
+      },
+      {
+        "category": "Transport",
+        "total_spent": 0.0,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0,
+        "status": "NORMAL"
+      }
+    ]
+  },
+  "after_redeploy": {
+    "deploy_id": "dep-dc22gnnf3r2c73e520rg",
+    "verified_at": "2026-11-23T11:51:14.278209+00:00",
+    "record": {
+      "id": 1,
+      "category": "Food",
+      "amount": 12.34,
+      "alert_status": "NORMAL",
+      "created_at": "2026-11-23T11:49:27.159370+00:00",
+      "note_sha256": "fae114e827480fb9d6ff4c0a1efab406e0ba7df36591aa092bdcfdcb177c4987"
+    },
+    "utc_month": "2026-11",
+    "summary": [
+      {
+        "category": "Daily",
+        "total_spent": 0.0,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0,
+        "status": "NORMAL"
+      },
+      {
+        "category": "Entertainment",
+        "total_spent": 0.0,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0,
+        "status": "NORMAL"
+      },
+      {
+        "category": "Food",
+        "total_spent": 12.34,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0082,
+        "status": "NORMAL"
+      },
+      {
+        "category": "Other",
+        "total_spent": 0.0,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0,
+        "status": "NORMAL"
+      },
+      {
+        "category": "Transport",
+        "total_spent": 0.0,
+        "monthly_budget": 1500.0,
+        "usage_ratio": 0.0,
+        "status": "NORMAL"
+      }
+    ]
+  },
+  "record_fields_equal": true,
+  "same_utc_month": true,
+  "all_five_budget_categories_equal": true,
+  "web_list_detail_and_direct_sql_match": true,
+  "streamlit_after_redeploy": {
+    "observation": "Visual inspection of the deployed application",
+    "budget_chart_loaded": true,
+    "food_total_spent": 12.34,
+    "food_monthly_budget": 1500.0,
+    "food_displayed_percent": "0.8%",
+    "ledger_filter": "Food",
+    "visible_rows": 1,
+    "visible_record": {"id": 1, "category": "Food", "amount": 12.34, "alert_status": "NORMAL"}
+  }
+}
