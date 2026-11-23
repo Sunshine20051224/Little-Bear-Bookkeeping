@@ -75,6 +75,26 @@ def test_evaluate_budget_status_invalid_inputs_raise_value_error(
         )
 
 
+@pytest.mark.parametrize(
+    ("amount", "budget", "expected_status", "expected_over"),
+    [
+        (1199.99, 1500.0, "NORMAL", 0.0),
+        (1200.00, 1500.0, "WARNING", 0.0),
+        (1500.00, 1500.0, "WARNING", 0.0),
+        (1500.01, 1500.0, "EXCEEDED", 0.01),
+        (0.04, 0.05, "WARNING", 0.0),
+    ],
+)
+def test_one_cent_budget_boundaries(amount, budget, expected_status, expected_over):
+    result = evaluate_budget_status(amount, 0.0, budget)
+    report = summarize_expenses_by_category(
+        [{"category": "Food", "amount": amount}], {"Food": budget}
+    )
+    food = next(item for item in report if item["category"] == "Food")
+    assert (result["status"], food["status"]) == (expected_status, expected_status)
+    assert result["over_amount"] == expected_over
+
+
 def test_summarize_expenses_does_not_mutate_input_and_service_evaluates() -> None:
     """Verify input records are untouched and BudgetAdvisorService returns expected report."""
     original_records = [{"category": "Food", "amount": 120.0, "note": "Lunch"}]

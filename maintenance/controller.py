@@ -17,6 +17,14 @@ from processing.service import BudgetAdvisorService
 logger = logging.getLogger("maintenance.controller")
 
 
+def _utc_instant(value: str | datetime) -> datetime:
+    """SQLite 的无偏移时间按 UTC 解释，带偏移时间换算为同一 UTC 时刻。"""
+    instant = datetime.fromisoformat(value) if isinstance(value, str) else value
+    if instant.tzinfo is None:
+        return instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(timezone.utc)
+
+
 def should_trigger_replacement(
     status_info: dict[str, Any],
     now: datetime | None = None,
@@ -165,27 +173,23 @@ class DatabaseMaintenanceController:
         target_engine = create_db_engine(target_database_url)
         Base.metadata.create_all(bind=target_engine)
 
-        with target_engine.connect() as conn:
+        records = payload["records"]
+        expenses = ExpenseRecord.__table__
+        with target_engine.begin() as conn:
             existing_count = conn.execute(text("SELECT COUNT(*) FROM expenses")).scalar_one()
             if int(existing_count) != 0:
                 raise RuntimeError("Target database must contain no application data before restoration.")
 
-        records = payload["records"]
-        with target_engine.begin() as conn:
             for item in records:
-                created_dt = datetime.fromisoformat(str(item["created_at"]))
                 conn.execute(
-                    text(
-                        "INSERT INTO expenses (id, category, amount, note, alert_status, created_at) "
-                        "VALUES (:id, :category, :amount, :note, :alert_status, :created_at)"
-                    ),
+                    expenses.insert(),
                     {
                         "id": int(item["id"]),
                         "category": str(item["category"]),
                         "amount": float(item["amount"]),
                         "note": str(item.get("note", "")),
                         "alert_status": str(item["alert_status"]),
-                        "created_at": created_dt,
+                        "created_at": _utc_instant(item["created_at"]),
                     },
                 )
 
@@ -197,57 +201,42 @@ class DatabaseMaintenanceController:
                     {"max_id": max_id},
                 )
 
-        # Verify restored contents and domain rule consistency.
-        with target_engine.connect() as conn:
+            # 校验全部字段后再提交，失败时目标库可以重新执行还原。
             restored_rows = conn.execute(
-                text(
-                    "SELECT id, category, amount, note, alert_status "
-                    "FROM expenses ORDER BY id ASC"
+                expenses.select().order_by(expenses.c.id)
+            ).mappings()
+            restored_dicts = [dict(row) for row in restored_rows]
+            if len(restored_dicts) != len(records):
+                raise RuntimeError("Restored record count mismatch.")
+
+            for expected, actual in zip(records, restored_dicts):
+                if (
+                    int(expected["id"]) != actual["id"]
+                    or expected["category"] != actual["category"]
+                    or float(expected["amount"]) != actual["amount"]
+                    or expected.get("note", "") != actual["note"]
+                    or expected["alert_status"] != actual["alert_status"]
+                    or _utc_instant(expected["created_at"]) != _utc_instant(actual["created_at"])
+                ):
+                    raise RuntimeError(f"Restored record content mismatch for id={expected['id']}.")
+
+            summary_report = self.budget_service.build_category_report(restored_dicts)
+
+            # 回滚试写行，保留所有真实记录，包括备注与试写行相同的记录。
+            probe_transaction = conn.begin_nested()
+            probe = conn.execute(
+                expenses.insert().values(
+                    category="Other",
+                    amount=1.0,
+                    note="post-restore-id-check",
+                    alert_status="NORMAL",
+                    created_at=datetime.now(timezone.utc),
                 )
-            ).fetchall()
-
-        restored_dicts = [
-            {
-                "id": int(r[0]),
-                "category": str(r[1]),
-                "amount": float(r[2]),
-                "note": str(r[3] or ""),
-                "alert_status": str(r[4]),
-            }
-            for r in restored_rows
-        ]
-
-        if len(restored_dicts) != len(records):
-            raise RuntimeError("Restored record count mismatch.")
-
-        for expected, actual in zip(records, restored_dicts):
-            if (
-                int(expected["id"]) != actual["id"]
-                or expected["category"] != actual["category"]
-                or float(expected["amount"]) != actual["amount"]
-                or expected.get("note", "") != actual["note"]
-            ):
-                raise RuntimeError(f"Restored record content mismatch for id={expected.get('id')}.")
-
-        # Verify domain rule produces matching summary report on restored records.
-        summary_report = self.budget_service.build_category_report(restored_dicts)
-
-        # Verify inserting a new record does not cause primary key collision.
-        with target_engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO expenses (category, amount, note, alert_status, created_at) "
-                    "VALUES (:category, :amount, :note, :alert_status, :created_at)"
-                ),
-                {
-                    "category": "Other",
-                    "amount": 1.0,
-                    "note": "post-restore-id-check",
-                    "alert_status": "NORMAL",
-                    "created_at": datetime.now(timezone.utc),
-                },
             )
-            conn.execute(text("DELETE FROM expenses WHERE note = 'post-restore-id-check'"))
+            last_restored_id = restored_dicts[-1]["id"] if restored_dicts else 0
+            if probe.inserted_primary_key[0] <= last_restored_id:
+                raise RuntimeError("Generated primary key did not advance past restored records.")
+            probe_transaction.rollback()
 
         return {
             "restored_count": len(restored_dicts),

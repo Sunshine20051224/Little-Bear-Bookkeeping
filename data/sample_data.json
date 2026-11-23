@@ -1,0 +1,5 @@
+[
+  {"category": "Food", "amount": 300.00, "note": "Demo 1 - groceries"},
+  {"category": "Food", "amount": 900.00, "note": "Demo 2 - catering"},
+  {"category": "Food", "amount": 350.00, "note": "Demo 3 - family dinner"}
+]

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 CategoryType = Literal["Food", "Transport", "Daily", "Entertainment", "Other"]
@@ -13,8 +13,20 @@ class ExpenseCreate(BaseModel):
     """Request body schema for creating a new expense record."""
 
     category: CategoryType
-    amount: float = Field(..., gt=0, description="Expense amount must be greater than 0")
+    amount: float = Field(
+        gt=0,
+        allow_inf_nan=False,
+        json_schema_extra={"multipleOf": 0.01},
+        description="Positive expense amount in whole cents.",
+    )
     note: str = Field(default="", max_length=200)
+
+    @field_validator("amount")
+    @classmethod
+    def require_whole_cents(cls, amount: float) -> float:
+        if amount != round(amount, 2):
+            raise ValueError("Expense amount must be a multiple of 0.01.")
+        return amount
 
 
 class ExpenseResponse(BaseModel):
@@ -36,7 +48,7 @@ class ExpenseEvaluationResponse(BaseModel):
     expense: ExpenseResponse
     updated_spent: float
     monthly_budget: float
-    usage_ratio: float
+    usage_ratio: float | None
     status: AlertStatusType
     over_amount: float
 
@@ -47,5 +59,5 @@ class CategorySummaryItem(BaseModel):
     category: str
     total_spent: float
     monthly_budget: float
-    usage_ratio: float
+    usage_ratio: float | None
     status: AlertStatusType

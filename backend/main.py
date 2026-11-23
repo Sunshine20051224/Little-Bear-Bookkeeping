@@ -1,11 +1,13 @@
 """FastAPI backend for personal expense tracking and budget alerts."""
 
+from calendar import monthrange
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 import logging
 from fastapi import Depends, FastAPI, HTTPException, Query, status
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query as DatabaseQuery, Session
 from backend.dependencies import get_budget_service
 from backend.schemas import (
     CategorySummaryItem,
@@ -44,6 +46,28 @@ app = FastAPI(
 )
 
 
+def _expenses_in_month(db: Session, reference: datetime) -> DatabaseQuery[ExpenseRecord]:
+    """Select expenses in the UTC calendar month containing the reference time."""
+    start = reference.astimezone(timezone.utc).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+    if db.get_bind().dialect.name == "sqlite":
+        # 旧版 SQLite 备份可带时差或省略微秒。先截到秒，再换算 UTC，
+        # 避免 SQLite 把月末 23:59:59.999999 四舍五入到次月。
+        stamp = ExpenseRecord.created_at
+        zone = case(
+            (func.substr(stamp, -6, 1).in_(("+", "-")), func.substr(stamp, -6)),
+            else_="",
+        )
+        month = func.strftime("%Y-%m", func.substr(stamp, 1, 19).concat(zone))
+        return db.query(ExpenseRecord).filter(month == start.strftime("%Y-%m"))
+    days_in_month = monthrange(start.year, start.month)[1]
+    end = start + timedelta(days=days_in_month)
+    return db.query(ExpenseRecord).filter(
+        ExpenseRecord.created_at >= start, ExpenseRecord.created_at < end
+    )
+
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
     """Lightweight health check endpoint."""
@@ -62,9 +86,11 @@ def create_expense(
 ) -> ExpenseEvaluationResponse:
     """Create an expense record, evaluate budget rule, and persist to DB."""
     try:
+        created_at = datetime.now(timezone.utc)
         previous_spent = float(
-            db.query(func.coalesce(func.sum(ExpenseRecord.amount), 0.0))
+            _expenses_in_month(db, created_at)
             .filter(ExpenseRecord.category == payload.category)
+            .with_entities(func.coalesce(func.sum(ExpenseRecord.amount), 0.0))
             .scalar()
         )
         evaluation = service.assess_new_expense(
@@ -78,6 +104,7 @@ def create_expense(
             amount=round(payload.amount, 2),
             note=payload.note.strip(),
             alert_status=evaluation["status"],
+            created_at=created_at,
         )
         db.add(record)
         db.flush()
@@ -158,9 +185,9 @@ def get_summary(
     db: Session = Depends(get_db),
     service: BudgetAdvisorService = Depends(get_budget_service),
 ) -> list[CategorySummaryItem]:
-    """Return category spending totals, budget ratios, and alert statuses."""
+    """Return spending, budget ratios and alert statuses for the current UTC month."""
     try:
-        rows = db.query(ExpenseRecord).all()
+        rows = _expenses_in_month(db, datetime.now(timezone.utc)).all()
         payload = [
             {"category": row.category, "amount": float(row.amount)}
             for row in rows

@@ -14,6 +14,11 @@ CATEGORIES = ["Food", "Transport", "Daily", "Entertainment", "Other"]
 REQUEST_TIMEOUT = 10.0
 
 
+def format_budget_usage(ratio: float | None) -> str:
+    """Show why a category with no budget has no meaningful percentage."""
+    return "N/A (zero budget)" if ratio is None else f"{ratio:.1%}"
+
+
 def fetch_summary() -> tuple[list[dict] | None, str | None]:
     """Fetch category budget summary from FastAPI backend."""
     try:
@@ -82,7 +87,7 @@ def main() -> None:
                 msg = (
                     f"Saved #{result['expense']['id']} | Status: {status_label} | "
                     f"Spent: {result['updated_spent']} / {result['monthly_budget']} "
-                    f"({result['usage_ratio'] * 100:.1f}%)"
+                    f"| Usage: {format_budget_usage(result['usage_ratio'])}"
                 )
                 if status_label == "EXCEEDED":
                     st.warning(f"{msg} | Over budget by: {result['over_amount']}")
@@ -104,6 +109,9 @@ def main() -> None:
         summary_df = pd.DataFrame(summary_data)
         chart_df = summary_df.set_index("category")[["total_spent", "monthly_budget"]]
         st.bar_chart(chart_df)
+        summary_df["usage_ratio"] = [
+            format_budget_usage(item["usage_ratio"]) for item in summary_data
+        ]
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
     st.divider()

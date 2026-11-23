@@ -1,9 +1,28 @@
 """Pure functional domain rules for personal expense and budget evaluation."""
 
+from decimal import Decimal
 from typing import Any
 
 
 VALID_CATEGORIES = ("Food", "Transport", "Daily", "Entertainment", "Other")
+
+
+def _classify_spending(
+    spent: float, budget: float, warning_ratio: float
+) -> tuple[float | None, str]:
+    """Classify the monetary amount before rounding the usage ratio for display."""
+    if budget == 0:
+        return None, "EXCEEDED" if spent > 0 else "NORMAL"
+
+    spent_amount = Decimal(str(spent))
+    budget_amount = Decimal(str(budget))
+    if spent_amount > budget_amount:
+        status = "EXCEEDED"
+    elif spent_amount >= budget_amount * Decimal(str(warning_ratio)):
+        status = "WARNING"
+    else:
+        status = "NORMAL"
+    return round(spent / budget, 4), status
 
 
 def evaluate_budget_status(
@@ -22,6 +41,7 @@ def evaluate_budget_status(
 
     Output:
         Dictionary with updated total spent, usage ratio, alert status, and over-budget amount.
+        A zero budget has no defined usage ratio.
     """
     if amount <= 0:
         raise ValueError("Expense amount must be greater than 0.")
@@ -34,21 +54,8 @@ def evaluate_budget_status(
 
     updated_spent = round(previous_spent + amount, 2)
 
-    if monthly_budget == 0:
-        usage_ratio = float("inf")
-        status = "EXCEEDED"
-        over_amount = updated_spent
-    else:
-        usage_ratio = round(updated_spent / monthly_budget, 4)
-        if usage_ratio > 1.0:
-            status = "EXCEEDED"
-            over_amount = round(updated_spent - monthly_budget, 2)
-        elif usage_ratio >= warning_ratio:
-            status = "WARNING"
-            over_amount = 0.0
-        else:
-            status = "NORMAL"
-            over_amount = 0.0
+    usage_ratio, status = _classify_spending(updated_spent, monthly_budget, warning_ratio)
+    over_amount = max(0.0, round(updated_spent - monthly_budget, 2))
 
     return {
         "updated_spent": updated_spent,
@@ -77,17 +84,7 @@ def summarize_expenses_by_category(
     summaries: list[dict[str, Any]] = []
     for cat, total_spent in totals.items():
         budget = float(category_budgets.get(cat, default_budget))
-        if budget == 0:
-            ratio = float("inf") if total_spent > 0 else 0.0
-            status = "EXCEEDED" if total_spent > 0 else "NORMAL"
-        else:
-            ratio = round(total_spent / budget, 4)
-            if ratio > 1.0:
-                status = "EXCEEDED"
-            elif ratio >= warning_ratio:
-                status = "WARNING"
-            else:
-                status = "NORMAL"
+        ratio, status = _classify_spending(total_spent, budget, warning_ratio)
 
         summaries.append(
             {
