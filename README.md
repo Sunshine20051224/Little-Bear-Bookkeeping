@@ -3,8 +3,8 @@
 基于多范式编程（Multi-Paradigm Programming）构建的个人记账与预算预警应用，涵盖数据持久化、纯函数业务规则与汇总计算、异步维护与备份检查以及前后端交互界面。
 
 - **GitHub 仓库**：`[https://github.com/Sunshine20051224/Little-Bear-Bookkeeping](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping)`
-- **前端地址（Streamlit Cloud）**：`[部署完成后填入 Streamlit Cloud 公开访问链接，暂可留空或写 TBD]`
-- **后端 API 地址（Render）**：`[部署完成后填入 Render 后端服务链接，暂可留空或写 TBD]`
+- **前端地址（Streamlit Cloud）**：`https://little-bear-bookkeeping-2ppuqrbguqmlayds7pcqkn.streamlit.app/`
+- **后端 API 地址（Render）**：`https://little-bear-bookkeeping.onrender.com`
 
 ---
 
