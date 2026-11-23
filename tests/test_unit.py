@@ -124,6 +124,13 @@ def test_summarize_expenses_does_not_mutate_input_and_service_evaluates() -> Non
         ({"planned_maintenance": False, "completed_maintenance": True}, False),
         (
             {
+                "completed_maintenance": True,
+                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+            },
+            True,
+        ),
+        (
+            {
                 "planned_maintenance": False,
                 "completed_maintenance": False,
                 "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
@@ -149,6 +156,15 @@ def test_maintenance_decision_rules(
     """Verify replacement trigger decisions for maintenance flags and expiry timestamps."""
     triggered, _ = should_trigger_replacement(status_payload, now=datetime.now(timezone.utc))
     assert triggered is expected_trigger
+
+
+def test_scheduled_run_survives_completed_provider_maintenance():
+    from maintenance.workflow import _due
+
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    status = {"completed_maintenance": True, "planned_maintenance": False}
+    assert _due(status, past, "source", "source")
+    assert not _due(status, past, "replacement", "source")
 
 
 def test_maintenance_async_status_and_missing_backup_handling(tmp_path: Path) -> None:
@@ -224,6 +240,31 @@ def test_post_switch_failure_preserves_write_blocks_and_backup(tmp_path):
     asyncio.run(replace(store, spec, RUN_ID, cloud, backend, data))
     assert store.read()["stage"] == "complete"
     assert backend.probes == 1 and data.events.count("restore:target") == 1
+
+
+def test_resume_after_controller_stops_before_sending_create(tmp_path, monkeypatch):
+    from maintenance.workflow import RunSpec, StateStore, replace
+    from tests.workflow_fakes import Cloud, Backend, LocalData, RUN_ID
+
+    store = StateStore(tmp_path)
+    spec = RunSpec("source", "service", "owner", "free", "region", "16", 1)
+    cloud, backend, data = Cloud(), Backend(), LocalData()
+    args = (store, spec, RUN_ID, cloud, backend, data)
+    advance = store.advance
+
+    def interrupted(state, stage, **changes):
+        advance(state, stage, **changes)
+        if stage == "creating":
+            raise KeyboardInterrupt()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "advance", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            asyncio.run(replace(*args, trial_url="scratch"))
+
+    assert "create" not in cloud.events and "delete:source" in cloud.events
+    state = asyncio.run(replace(*args, trial_url="scratch"))
+    assert state["stage"] == "complete" and cloud.events.count("create") == 1
 
 
 def test_timed_out_create_is_claimed_without_a_second_post(tmp_path):

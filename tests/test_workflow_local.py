@@ -88,3 +88,21 @@ def test_preflight_rejects_unrelated_data_before_locking(tmp_path):
             url, None, RunSpec("source", "service", "owner", "dev", "local", "16", 2)
         )
     engine.dispose()
+
+
+def test_backend_preflight_waits_for_free_service_to_wake_up():
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(503)
+        return httpx.Response(200, headers={"X-Bookkeeping-Write-Guard": "1"}, json={"status": "ok"})
+
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle), base_url="https://course.test") as client:
+            await BackendClient(client).preflight()
+
+    asyncio.run(exercise())
+    assert [request.method for request in requests] == ["GET", "GET"]
+    assert requests[0].extensions["timeout"]["read"] >= 60

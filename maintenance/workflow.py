@@ -20,6 +20,7 @@ import httpx
 from dotenv import load_dotenv
 
 from maintenance.controller import should_trigger_replacement
+from maintenance.render_provider import RenderError, RenderRequestRejected
 from maintenance.storage import write_json_atomically
 
 
@@ -109,14 +110,12 @@ def _digest(path):
 
 
 def _due(status, planned_at, source, configured_source):
-    if status.get("completed_maintenance") is True:
-        return False
     if planned_at and source == configured_source:
         at = datetime.fromisoformat(planned_at)
         if at.tzinfo is None:
             raise WorkflowError("MAINTENANCE_AT_UTC must include an explicit UTC offset.")
         if datetime.now(timezone.utc) >= at:
-            status = {**status, "planned_maintenance": True}
+            return True
     return should_trigger_replacement(status)[0]
 
 
@@ -242,13 +241,17 @@ async def _advance_run(store, state, spec, provider, backend, data, trial_url, i
         if await provider.find_target(run):
             raise WorkflowError("A run-labelled target already exists before the first creation request.")
         store.advance(state, "creating")
-        try:
-            target = await provider.create_target(run, spec.plan, spec.region, spec.version)
-        except Exception:
-            target = await _claim_target(provider, run)
+    if state["stage"] == "creating":
+        target = await provider.find_target(run)
+        if not target:
+            # Render 适配器持久记录 POST 是否发出；结果不明时仅按运行标记查找。
+            try:
+                target = await provider.create_target(run, spec.plan, spec.region, spec.version)
+            except RenderRequestRejected:
+                raise
+            except Exception:
+                target = await _claim_target(provider, run)
         _record_target(store, state, target)
-    elif state["stage"] == "creating":
-        _record_target(store, state, await _claim_target(provider, run))
     target = state["target_id"]
     if state["stage"] == "target_created":
         await provider.wait_ready(target)
@@ -453,7 +456,7 @@ def main():
     logging.disable(logging.CRITICAL)
     try:
         asyncio.run(_command(args))
-    except WorkflowError as exc:
+    except (WorkflowError, RenderError) as exc:
         parser.exit(2, str(exc) + "\n")
     except Exception as exc:
         parser.exit(1, "Maintenance stopped (" + type(exc).__name__ +

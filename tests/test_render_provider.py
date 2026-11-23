@@ -202,6 +202,27 @@ def test_ambiguous_create_stops_if_marker_not_yet_visible(settings):
     assert len(posts) == 1
 
 
+def test_explicitly_rate_limited_create_can_resume_with_same_marker(settings):
+    posts = []
+
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        posts.append(json.loads(request.content))
+        if len(posts) == 1:
+            return httpx.Response(429)
+        return httpx.Response(201, json=record(TARGET, name=posts[-1]["name"]))
+
+    async def action(provider):
+        provider._save(provider._snapshot("source"), {"source": SOURCE, "ipAllowList": []})
+        with pytest.raises(RenderError, match="429"):
+            await provider.create_target("rate-limited", "free", "frankfurt", "16")
+        assert await provider.create_target("rate-limited", "free", "frankfurt", "16") == TARGET
+
+    run(handler, action)
+    assert len(posts) == 2 and posts[0] == posts[1]
+
+
 @pytest.mark.parametrize("change", ["owner", "plan", "duplicate"])
 def test_find_rejects_incorrect_or_ambiguous_target(settings, change):
     def handler(r):
@@ -242,8 +263,9 @@ def test_delete_checks_until_absent_and_can_resume(settings):
 
 
 @pytest.mark.parametrize("queued", [False, True])
+@pytest.mark.parametrize("rate_limited", [False, True])
 def test_switch_changes_only_database_url_and_confirms_new_deploy(
-    settings, tmp_path, queued
+    settings, tmp_path, queued, rate_limited
 ):
     import hashlib
 
@@ -263,6 +285,9 @@ def test_switch_changes_only_database_url_and_confirms_new_deploy(
         if r.method == "POST":
             assert path.endswith("/deploys")
             assert json.loads(r.content) == {"deployMode": "deploy_only"}
+            if rate_limited and "REJECTED" not in writes:
+                writes.append("REJECTED")
+                return httpx.Response(429)
             writes.append("POST")
             return (
                 httpx.Response(202)
@@ -293,9 +318,12 @@ def test_switch_changes_only_database_url_and_confirms_new_deploy(
         )
         return await p.switch_backend(SERVICE, TARGET, "switch")
 
+    if rate_limited:
+        with pytest.raises(RenderError, match="429"):
+            run(handler, switch)
     for _ in range(2):
         assert run(handler, switch) == "dep-new"
-    assert writes == ["PUT", "POST"]
+    assert writes == (["PUT", "REJECTED", "POST"] if rate_limited else ["PUT", "POST"])
     assert all(
         "fake-password" not in path.read_text() for path in tmp_path.glob("*.json")
     )

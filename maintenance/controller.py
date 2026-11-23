@@ -49,10 +49,8 @@ def should_trigger_replacement(
     if reference_now.tzinfo is None:
         reference_now = reference_now.replace(tzinfo=timezone.utc)
 
-    if status_info.get("completed_maintenance") is True:
-        return False, "Maintenance request is already completed."
-
-    if status_info.get("planned_maintenance") is True:
+    completed = status_info.get("completed_maintenance") is True
+    if status_info.get("planned_maintenance") is True and not completed:
         return True, "Planned maintenance flag is active."
 
     expires_at_raw = status_info.get("expires_at")
@@ -65,6 +63,8 @@ def should_trigger_replacement(
         if hours_remaining <= threshold_hours:
             return True, f"Database expires in {hours_remaining:.1f} hours."
 
+    if completed:
+        return False, "Maintenance request is already completed."
     return False, "No maintenance or expiry trigger condition met."
 
 

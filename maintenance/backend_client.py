@@ -1,5 +1,6 @@
 """Compare restored data with public, read-only responses from the deployed backend."""
 
+import asyncio
 from datetime import datetime, timezone
 import os
 
@@ -46,9 +47,20 @@ class BackendClient:
             raise ValueError("Set BACKEND_URL to the authorised deployed application.")
 
     async def _get(self, path: str) -> httpx.Response:
-        response = await self.client.get(f"{self.base_url}{path}", timeout=20)
-        response.raise_for_status()
-        return response
+        # Render 免费 Web Service 从休眠恢复通常需要约一分钟。
+        async with asyncio.timeout(95):
+            while True:
+                try:
+                    response = await self.client.get(
+                        f"{self.base_url}{path}", timeout=httpx.Timeout(75, connect=10)
+                    )
+                except (httpx.TimeoutException, httpx.NetworkError):
+                    pass
+                else:
+                    if response.status_code not in (502, 503, 504):
+                        response.raise_for_status()
+                        return response
+                await asyncio.sleep(3)
 
     async def preflight(self) -> None:
         response = await self._get("/health")

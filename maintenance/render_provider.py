@@ -74,6 +74,10 @@ class RenderError(RuntimeError):
     """只包含可写入运行日志的错误类别或 HTTP 状态码。"""
 
 
+class RenderRequestRejected(RenderError):
+    """Render 明确拒绝了请求，可以在同一运行中再次提交。"""
+
+
 def _id(value: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
         raise RenderError("Invalid Render resource ID.")
@@ -239,6 +243,8 @@ class RenderBackend:
                         return response.json()
                     except ValueError:
                         raise RenderError("Render returned invalid JSON.") from None
+                if method == "POST" and status in (400, 401, 403, 404, 422, 429):
+                    raise RenderRequestRejected(f"Render {method} rejected (HTTP {status}).")
                 if (
                     method != "GET"
                     or status not in (429, 500, 502, 503, 504)
@@ -370,9 +376,14 @@ class RenderBackend:
         if not checkpoint["issued"]:
             checkpoint["issued"] = True
             self._save(path, checkpoint)
-            response = await self._api(
-                "POST", deploys_path, body={"deployMode": "deploy_only"}
-            )
+            try:
+                response = await self._api(
+                    "POST", deploys_path, body={"deployMode": "deploy_only"}
+                )
+            except RenderRequestRejected:
+                checkpoint["issued"] = False
+                self._save(path, checkpoint)
+                raise
             if response:
                 checkpoint["deploy"] = _id(response.get("id"))
                 self._save(path, checkpoint)
@@ -583,7 +594,11 @@ class RenderProvider(RenderBackend):
         if "environmentId" in template:
             body["environmentId"] = template["environmentId"]
         self._save(marker, {"issued": True})
-        created = await self._api("POST", "/postgres", body=body)
+        try:
+            created = await self._api("POST", "/postgres", body=body)
+        except RenderRequestRejected:
+            marker.unlink()
+            raise
         return self._target(created, name)
 
     async def wait_ready(self, instance_id):
