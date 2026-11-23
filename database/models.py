@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for personal expense tracking."""
 
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, event
 from sqlalchemy.orm import declarative_base
 
 
@@ -23,3 +23,23 @@ class ExpenseRecord(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+class WriteGuard(Base):
+    """One database-local row coordinates admitted writes and a maintenance run."""
+
+    __tablename__ = "bookkeeping_write_guard"
+
+    id = Column(Integer, primary_key=True, autoincrement=False)
+    owner = Column(String(128))
+    last_released_owner = Column(String(128))
+    probe_id = Column(Integer)
+    probe_note = Column(String(100))
+    probe_time = Column(DateTime(timezone=True))
+    probe_verified = Column(Boolean, nullable=False, default=False)
+
+
+@event.listens_for(WriteGuard.__table__, "after_create")
+def _seed_guard(table, connection, **_kwargs):
+    # App restarts leave an existing row and its maintenance state intact.
+    connection.execute(table.insert().values(id=1, probe_verified=False))

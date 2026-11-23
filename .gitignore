@@ -5,6 +5,9 @@ env/
 
 # Environment variables and secrets
 .env
+.env.*
+!.env.example
+.little-bear-maintenance/
 .streamlit/secrets.toml
 
 # Python cache and build artifacts

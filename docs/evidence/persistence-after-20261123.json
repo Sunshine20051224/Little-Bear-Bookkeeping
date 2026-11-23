@@ -1,0 +1,36 @@
+{
+  "phase": "after redeployment",
+  "observed_at_utc": "2026-11-23T10:48:53.3680011Z",
+  "backend": "https://little-bear-bookkeeping.onrender.com",
+  "before_evidence": "persistence-before-20261123.json",
+  "deploy_before": {
+    "id": "dep-dc1up9u0tbcc73b6n8hg",
+    "commit": "6edba96"
+  },
+  "deploy_after": {
+    "id": "dep-dc21jfajnfac73a2vdug",
+    "commit": "6edba96",
+    "reported_live_at": "2026-11-23T18:48:41+08:00"
+  },
+  "marker_before": {
+    "id": 1,
+    "category": "Other",
+    "amount": 1.23,
+    "note": "course-persistence-20261123-r1",
+    "category_total": 1.23
+  },
+  "after": {
+    "GET /health": {"status": "ok"},
+    "GET /expenses/1": {"http_status": 404},
+    "GET /expenses": [],
+    "GET /summary": {"category": "Other", "total_spent": 0.0}
+  },
+  "frontend_after": {
+    "connected_api": "https://little-bear-bookkeeping.onrender.com",
+    "monthly_budget_overview_loaded": true,
+    "expense_records_filter": "All",
+    "expense_records_message": "No expense records found for the selected filter."
+  },
+  "persistence_passed": false,
+  "result": "The pre-deployment marker was absent from the redeployed service and the Other category total fell to zero."
+}

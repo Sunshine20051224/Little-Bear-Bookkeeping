@@ -178,3 +178,95 @@ def test_maintenance_async_status_and_missing_backup_handling(tmp_path: Path) ->
             backup_path=missing_file,
             target_database_url=f"sqlite:///{tmp_path / 'target.db'}",
         )
+
+
+@pytest.mark.parametrize("slot_limit", [1, 2])
+def test_replacement_resumes_after_uncertain_creation(tmp_path, slot_limit):
+    from maintenance.workflow import RunSpec, StateStore, replace
+    from tests.workflow_fakes import Cloud, Backend, LocalData, RUN_ID
+
+    store = StateStore(tmp_path)
+    spec = RunSpec("source", "service", "owner", "free", "region", "16", slot_limit)
+    cloud, backend, data = Cloud(), Backend(), LocalData()
+    args = (store, spec, RUN_ID, cloud, backend, data)
+    cloud.interrupt_creation = True
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(replace(*args, trial_url="scratch"))
+    assert data.blocked["source"] == RUN_ID
+    assert store.read()["stage"] == "creating"
+    assert cloud.events.count("create") == 1
+    assert ("delete:source" in cloud.events) == (slot_limit == 1)
+    assert ("restore:scratch" in data.events) == (slot_limit == 1)
+    asyncio.run(replace(*args, trial_url="scratch"))
+    asyncio.run(replace(*args, trial_url="scratch"))
+    assert store.read()["stage"] == "complete"
+    assert store.read()["active_id"] == "target"
+    assert data.blocked["target"] is None
+    assert cloud.events.count("create") == cloud.events.count("delete:source") == 1
+    assert data.events.count("restore:target") == backend.probes == 1
+
+
+def test_post_switch_failure_preserves_write_blocks_and_backup(tmp_path):
+    from maintenance.workflow import RunSpec, StateStore, replace
+    from tests.workflow_fakes import Cloud, Backend, LocalData, RUN_ID
+
+    store = StateStore(tmp_path)
+    spec = RunSpec("source", "service", "owner", "free", "region", "16", 2)
+    cloud, backend, data = Cloud(), Backend(), LocalData()
+    backend.fail_verify = True
+    with pytest.raises(RuntimeError, match="synthetic read mismatch"):
+        asyncio.run(replace(store, spec, RUN_ID, cloud, backend, data))
+    assert store.read()["stage"] == "switched"
+    assert data.blocked == {"source": RUN_ID, "target": RUN_ID}
+    assert Path(store.read()["backup"]).exists()
+    assert "delete:source" not in cloud.events
+    backend.fail_verify = False
+    asyncio.run(replace(store, spec, RUN_ID, cloud, backend, data))
+    assert store.read()["stage"] == "complete"
+    assert backend.probes == 1 and data.events.count("restore:target") == 1
+
+
+def test_timed_out_create_is_claimed_without_a_second_post(tmp_path):
+    from maintenance.workflow import RunSpec, StateStore, replace
+    from tests.workflow_fakes import Cloud, Backend, LocalData, RUN_ID
+
+    cloud = Cloud()
+    cloud.timeout_creation = True
+    store = StateStore(tmp_path)
+    spec = RunSpec("source", "service", "owner", "free", "region", "16", 2)
+    asyncio.run(replace(store, spec, RUN_ID, cloud, Backend(), LocalData()))
+    assert store.read()["stage"] == "complete"
+    assert cloud.events.count("create") == 1
+
+
+def test_controller_process_lock_and_provider_failure_are_safe(tmp_path):
+    from maintenance.workflow import RunSpec, StateStore, WorkflowError, replace
+    from tests.workflow_fakes import Cloud, Backend, LocalData, RUN_ID
+
+    store = StateStore(tmp_path)
+    with store.lock("watch"), pytest.raises(WorkflowError, match="watch"):
+        with StateStore(tmp_path).lock("watch"):
+            pytest.fail("Two schedulers acquired the same lock.")
+
+    class Unavailable(Cloud):
+        async def status(self, source):
+            raise TimeoutError("secret-test-marker")
+
+    cloud, data = Unavailable(), LocalData()
+    spec = RunSpec("source", "service", "owner", "free", "region", "16", 1)
+    with pytest.raises(TimeoutError):
+        asyncio.run(replace(store, spec, RUN_ID, cloud, Backend(), data, trial_url="scratch"))
+    assert not cloud.events and not data.blocked
+    assert store.read()["stage"] == "checking"
+    assert "secret-test-marker" not in (tmp_path / (RUN_ID + ".jsonl")).read_text()
+
+
+def test_unknown_database_provider_stops_before_cloud_requests(tmp_path, monkeypatch):
+    from argparse import Namespace
+    from maintenance.workflow import WorkflowError, _command
+
+    monkeypatch.setenv("MAINTENANCE_PROVIDER", "unconfirmed-database-provider")
+    monkeypatch.setenv("MAINTENANCE_STATE_DIR", str(tmp_path / "unused"))
+    with pytest.raises(WorkflowError, match="actual database provider"):
+        asyncio.run(_command(Namespace(command="run")))
+    assert not (tmp_path / "unused").exists()

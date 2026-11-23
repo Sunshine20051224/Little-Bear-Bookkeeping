@@ -4,7 +4,9 @@ from calendar import monthrange
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import logging
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+import os
+import re
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from sqlalchemy import case, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Query as DatabaseQuery, Session
@@ -17,6 +19,7 @@ from backend.schemas import (
 )
 from database.models import ExpenseRecord
 from database.session import get_db, init_db
+from maintenance.db_guard import WritesBlocked, require_app_write
 from processing.service import BudgetAdvisorService
 
 
@@ -69,8 +72,13 @@ def _expenses_in_month(db: Session, reference: datetime) -> DatabaseQuery[Expens
 
 
 @app.get("/health")
-def health_check() -> dict[str, str]:
+def health_check(response: Response, db: Session = Depends(get_db)) -> dict[str, str]:
     """Lightweight health check endpoint."""
+    response.headers["X-Bookkeeping-Write-Guard"] = "1"
+    response.headers["X-Bookkeeping-Database"] = db.get_bind().dialect.name
+    commit = os.getenv("RENDER_GIT_COMMIT", "")
+    if re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+        response.headers["X-Bookkeeping-Commit"] = commit
     return {"status": "ok"}
 
 
@@ -86,6 +94,7 @@ def create_expense(
 ) -> ExpenseEvaluationResponse:
     """Create an expense record, evaluate budget rule, and persist to DB."""
     try:
+        require_app_write(db)
         created_at = datetime.now(timezone.utc)
         previous_spent = float(
             _expenses_in_month(db, created_at)
@@ -123,6 +132,8 @@ def create_expense(
             status=evaluation["status"],
             over_amount=evaluation["over_amount"],
         )
+    except WritesBlocked as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except ValueError as exc:
         db.rollback()
         logger.warning("Invalid expense input: %s", exc)

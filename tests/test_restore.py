@@ -87,6 +87,27 @@ def test_restore_preserves_utc_month_boundaries(tmp_path: Path) -> None:
     target.dispose()
 
 
+def test_restart_recognises_committed_restore_and_rechecks_contents(tmp_path):
+    source = create_db_engine(f"sqlite:///{tmp_path / 'source.db'}")
+    target_url = f"sqlite:///{tmp_path / 'target.db'}"
+    Base.metadata.create_all(source)
+    table = ExpenseRecord.__table__
+    with source.begin() as conn:
+        conn.execute(table.insert().values(category="Daily", amount=10))
+    controller = DatabaseMaintenanceController(tmp_path)
+    backup = controller.create_backup(source, "source")
+    run = "8a7868d6-e9a0-48f9-a947-816ec86022ae"
+    first = controller.restore_and_verify(backup, target_url, run_id=run)
+    assert controller.restore_and_verify(backup, target_url, run_id=run) == first
+    target = create_db_engine(target_url)
+    with target.begin() as conn:
+        conn.execute(table.update().values(amount=20))
+    with pytest.raises(RuntimeError, match="content mismatch"):
+        controller.restore_and_verify(backup, target_url, run_id=run)
+    source.dispose()
+    target.dispose()
+
+
 @pytest.mark.parametrize(
     "changed_column",
     ["alert_status = 'EXCEEDED'", "created_at = '2000-01-01 00:00:00'"],

@@ -1,16 +1,19 @@
 """Maintenance controller for asynchronous DB status checks, backup/restore, and replacement."""
 
 import asyncio
+from contextlib import ExitStack
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 from pathlib import Path
 from typing import Any
 import httpx
-from sqlalchemy import inspect, text
+from sqlalchemy import Column, MetaData, String, Table, inspect, text
 from sqlalchemy.engine import Engine
 from database.models import Base, ExpenseRecord
 from database.session import create_db_engine
+from maintenance.storage import write_json_atomically
 from processing.service import BudgetAdvisorService
 
 
@@ -23,6 +26,15 @@ def _utc_instant(value: str | datetime) -> datetime:
     if instant.tzinfo is None:
         return instant.replace(tzinfo=timezone.utc)
     return instant.astimezone(timezone.utc)
+
+
+def _monthly_report(service, records, reference):
+    instant = _utc_instant(reference)
+    in_month = [
+        row for row in records
+        if _utc_instant(row["created_at"]).strftime("%Y-%m") == instant.strftime("%Y-%m")
+    ]
+    return service.build_category_report(in_month)
 
 
 def should_trigger_replacement(
@@ -80,11 +92,11 @@ async def fetch_provider_status_async(
             return data
         except (httpx.HTTPError, ValueError) as exc:
             last_error = exc
-            logger.warning("Provider status check attempt %s failed: %s", attempt + 1, exc)
+            logger.warning("Provider status check attempt %s failed (%s).", attempt + 1, type(exc).__name__)
             if attempt < max_retries:
                 await asyncio.sleep(0.2 * (attempt + 1))
 
-    raise RuntimeError(f"Failed to fetch provider status after {max_retries + 1} attempts: {last_error}")
+    raise RuntimeError(f"Provider status unavailable after {max_retries + 1} attempts.") from last_error
 
 
 class DatabaseMaintenanceController:
@@ -146,13 +158,21 @@ class DatabaseMaintenanceController:
         filename = backup_name or f"backup_{source_instance_id}_{timestamp}.json"
         backup_path = self.backup_dir / filename
 
+        reference = datetime.now(timezone.utc).isoformat()
         payload = {
             "source_instance_id": source_instance_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "tables": tables,
+            "created_at": reference,
+            "reference_time": reference,
+            "budget_settings": {
+                "default_budget": self.budget_service.default_budget,
+                "warning_ratio": self.budget_service.warning_ratio,
+                "category_budgets": self.budget_service.category_budgets,
+            },
+            "expected_summary": _monthly_report(self.budget_service, records, reference),
+            "tables": ["expenses"],
             "records": records,
         }
-        backup_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        write_json_atomically(backup_path, payload)
         logger.info("Backup created at %s with %s records.", backup_path, len(records))
         return backup_path
 
@@ -160,6 +180,8 @@ class DatabaseMaintenanceController:
         self,
         backup_path: Path,
         target_database_url: str,
+        *,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         """Restore backup into an empty target DB and verify records, IDs, and domain rules."""
         if not backup_path.exists():
@@ -171,16 +193,30 @@ class DatabaseMaintenanceController:
             raise ValueError("Invalid backup file structure: missing 'records' list.")
 
         target_engine = create_db_engine(target_database_url)
-        Base.metadata.create_all(bind=target_engine)
-
         records = payload["records"]
         expenses = ExpenseRecord.__table__
-        with target_engine.begin() as conn:
+        receipt = Table("maintenance_restore_receipt", MetaData(),
+                        Column("run_id", String(36), primary_key=True),
+                        Column("digest", String(64), nullable=False))
+        with ExitStack() as resources:
+            resources.callback(target_engine.dispose)
+            Base.metadata.create_all(bind=target_engine)
+            conn = resources.enter_context(target_engine.begin())
+            restored_before = False
+            if run_id:
+                digest = hashlib.sha256(backup_path.read_bytes()).hexdigest()
+                receipt.create(conn, checkfirst=True)
+                existing = conn.scalar(receipt.select().with_only_columns(receipt.c.digest)
+                                       .where(receipt.c.run_id == run_id))
+                if existing is not None:
+                    if existing != digest:
+                        raise RuntimeError("Already restored using a different backup.")
+                    restored_before = True
             existing_count = conn.execute(text("SELECT COUNT(*) FROM expenses")).scalar_one()
-            if int(existing_count) != 0:
+            if int(existing_count) != 0 and not restored_before:
                 raise RuntimeError("Target database must contain no application data before restoration.")
 
-            for item in records:
+            for item in ([] if restored_before else records):
                 conn.execute(
                     expenses.insert(),
                     {
@@ -194,7 +230,7 @@ class DatabaseMaintenanceController:
                 )
 
             # Ensure PostgreSQL sequence advances past max restored ID to prevent collisions.
-            if target_engine.dialect.name == "postgresql" and records:
+            if target_engine.dialect.name == "postgresql" and records and not restored_before:
                 max_id = max(int(r["id"]) for r in records)
                 conn.execute(
                     text("SELECT setval(pg_get_serial_sequence('expenses', 'id'), :max_id, true)"),
@@ -220,7 +256,17 @@ class DatabaseMaintenanceController:
                 ):
                     raise RuntimeError(f"Restored record content mismatch for id={expected['id']}.")
 
-            summary_report = self.budget_service.build_category_report(restored_dicts)
+            if "expected_summary" in payload:
+                service = BudgetAdvisorService(**payload["budget_settings"])
+                summary_report = _monthly_report(service, restored_dicts, payload["reference_time"])
+                if summary_report != payload["expected_summary"]:
+                    raise RuntimeError("Restored monthly budget report differs from source.")
+            else:
+                summary_report = self.budget_service.build_category_report(restored_dicts)
+            result = {"restored_count": len(restored_dicts), "source_instance_id": payload.get("source_instance_id"),
+                      "summary_report": summary_report, "verified": True}
+            if restored_before:
+                return result
 
             # 回滚试写行，保留所有真实记录，包括备注与试写行相同的记录。
             probe_transaction = conn.begin_nested()
@@ -237,10 +283,7 @@ class DatabaseMaintenanceController:
             if probe.inserted_primary_key[0] <= last_restored_id:
                 raise RuntimeError("Generated primary key did not advance past restored records.")
             probe_transaction.rollback()
+            if run_id:
+                conn.execute(receipt.insert().values(run_id=run_id, digest=digest))
 
-        return {
-            "restored_count": len(restored_dicts),
-            "source_instance_id": payload.get("source_instance_id"),
-            "summary_report": summary_report,
-            "verified": True,
-        }
+        return result
