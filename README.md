@@ -1,193 +1,154 @@
-# Little-Bear-Bookkeeping（小熊记账）
+# Little-Bear-Bookkeeping
 
-基于多范式编程（Multi-Paradigm Programming）构建的个人记账与预算预警应用，涵盖数据持久化、纯函数业务规则与汇总计算、异步维护与备份检查以及前后端交互界面。
+A personal expense tracking and budget alert application built with multi-paradigm programming principles, covering data persistence, pure-function business rules and aggregation, asynchronous maintenance and backup checks, and an interactive frontend/backend interface.
 
-- [GitHub 仓库](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping)
-- [前端应用入口 · Streamlit Community Cloud](https://little-bear-bookkeeping-2ppuqrbguqmlayds7pcqkn.streamlit.app/)
-- [后端 API 文档 · Render](https://little-bear-bookkeeping.onrender.com/docs) · [健康检查](https://little-bear-bookkeeping.onrender.com/health)
+- [GitHub Repository](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping)
+- [Frontend App · Streamlit Community Cloud](https://little-bear-bookkeeping-2ppuqrbguqmlayds7pcqkn.streamlit.app/)
+- [Backend API Docs · Render](https://little-bear-bookkeeping.onrender.com/docs) · [Health Check](https://little-bear-bookkeeping.onrender.com/health)
 
 ---
 
-## 1. 系统架构与目录结构
+## 1. System Architecture and Project Layout
 
-项目采用模块化分层设计，将数据库会话与模型、纯函数规则与汇总计算、异步维护控制、前后端入口与自动化测试解耦：
+The project uses a modular layered design that decouples database sessions and models, pure-function rules and summary calculation, asynchronous maintenance control, frontend/backend entry points, and automated tests:
 
-```text
 Little-Bear-Bookkeeping/
-├── .github/workflows/       # GitHub Actions CI 工作流配置
-├── backend/                 # 后端 API / 控制器与服务封装
-├── data/                    # 示例数据（如 sample_data.json）
-├── database/                # 数据库模型（models.py）、会话管理（session.py）
-├── frontend/                # 前端界面（app.py，Streamlit 应用）
-├── maintenance/             # 维护与备份检查逻辑（controller.py）
-├── processing/              # 核心业务规则（rules.py）与汇总服务（service.py）
-├── tests/                   # 单元测试（test_unit.py）与集成测试（test_integration.py）
-├── .env.example             # 环境变量示例模板
-├── .gitignore               # Git 忽略规则
-├── README.md                # 项目说明与工程记录
-├── requirements.txt         # Python 依赖清单
-└── start.py                 # 本地/统一启动入口
-```
+├── .github/workflows/       # GitHub Actions CI workflow configuration
+├── backend/                 # Backend API / controllers and service wrappers
+├── data/                    # Sample data (e.g., sample_data.json)
+├── database/                # Database models (models.py) and session management (session.py)
+├── frontend/                # Frontend UI (app.py, Streamlit application)
+├── maintenance/             # Maintenance, write guard, backup, and cloud replacement workflow
+├── processing/              # Core business rules (rules.py) and summary service (service.py)
+├── tests/                   # Unit tests (test_unit.py) and integration tests (test_integration.py)
+├── .env.example             # Environment variable example template
+├── .gitignore               # Git ignore rules
+├── README.md                # Project documentation and engineering records
+├── requirements.txt         # Python dependency list
+└── start.py                 # Local / unified entry point
 
-用户在 Streamlit 表单输入类别和金额。前端向 FastAPI 提交 JSON，后端从 SQLAlchemy 查询该类别当月已有支出，由 `BudgetAdvisorService` 调用预算规则，将账目及其入账时的预警状态写入数据库，再把结果交回前端。页面通过 API 刷新图表和账目列表。当前演示使用单本账簿，适合合成数据。
+Users enter a category and amount in the Streamlit form. The frontend sends JSON to FastAPI, the backend queries current-month spending for that category via SQLAlchemy, `BudgetAdvisorService` invokes the budget rules, writes the expense along with its recorded alert status to the database, and returns the result to the frontend. The page refreshes charts and the expense list through the API. The current demo uses a single ledger and is suited to synthetic data.
 
-## 2. 本地运行（Windows PowerShell）
+## 2. Local Setup (Windows PowerShell)
 
-在仓库根目录执行。项目的 `.python-version` 指定 Python 3.12.7，当前 GitHub Actions 使用 Python 3.11。旧压缩包附带的虚拟环境记录了原电脑的解释器路径，新电脑应重新创建。以下命令在 `venv` 中安装依赖，不依赖 PowerShell 的激活脚本。
+Run commands from the repository root. `.python-version` specifies Python 3.12.7, while GitHub Actions currently uses Python 3.11. Virtual environments bundled in old archives retain the original interpreter path and should be recreated on a new machine. The commands below install dependencies into `venv` without relying on PowerShell activation scripts.
 
-```powershell
 py -3.12 -m venv venv
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
 .\venv\Scripts\python.exe -m pytest -q
 .\venv\Scripts\python.exe start.py
-```
 
-打开 [本地前端](http://localhost:8501) 或 [本地 API 文档](http://127.0.0.1:8001/docs)。用 Ctrl+C 关闭启动脚本。若要独立启动，在两个终端分别运行以下两条命令，并分别用 Ctrl+C 停止。修改端口时同步更新前端的 `BACKEND_URL`。
+Open [Local Frontend](http://localhost:8501) or [Local API Docs](http://127.0.0.1:8001/docs), and stop the launcher with Ctrl+C. To run them separately, start each command in its own terminal and stop each with Ctrl+C. If you change ports, update `BACKEND_URL` for the frontend accordingly.
 
-```powershell
 .\venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8001
 .\venv\Scripts\python.exe -m streamlit run frontend/app.py --server.port 8501
-```
 
-本地使用 Python 自带的 SQLite 驱动。后端启动时建表，默认文件为 `expense_tracker.db`。`DATABASE_URL` 选择数据库，`DEFAULT_MONTHLY_BUDGET`、`BUDGET_FOOD` 等变量可设定默认预算和各类别预算，`BUDGET_WARNING_RATIO` 设置预警比例。示例配置见 [.env.example](.env.example)。前端部署时，入口为 `frontend/app.py`，在 Streamlit 的配置中将 `BACKEND_URL` 设为 Render 的公开后端地址。Render 的 Web Service 使用仓库根目录和启动命令 `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`。数据库连接值只填在相应环境的私有设置中。
+Local default runs use Python's built-in SQLite driver, while connecting to cloud or local PostgreSQL 16 uses `psycopg2-binary` from `requirements.txt`. The backend creates tables on startup, defaulting to `expense_tracker.db`. `DATABASE_URL` selects the database, while `DEFAULT_MONTHLY_BUDGET`, `BUDGET_FOOD`, and related variables configure default and category budgets, and `BUDGET_WARNING_RATIO` sets the warning threshold. See [.env.example](.env.example) for sample settings. When deploying the frontend, set the entry point to `frontend/app.py` and configure `BACKEND_URL` to the public Render backend URL in Streamlit settings. Render Web Service uses the repository root and start command `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`. Store database connection values only in private environment settings.
 
-## 3. 月度预算演示
+## 3. Monthly Budget Walkthrough
 
-钱款来自用户录入。仓库中的 [三笔合成消费](data/sample_data.json) 可手工录入。使用空的本地演示数据库、同一 UTC 自然月和默认 Food 预算 1500，按文件顺序提交，应看到下表。重复提交会新增一笔消费。历史账目可以跨月查询。
+Expenses come from user input. The [three synthetic expenses](data/sample_data.json) in the repository can be submitted manually. Using an empty local demo database, the same UTC calendar month, and a default Food budget of 1500, submitting them in file order produces the table below. Repeating a submission adds another expense. Historical records remain queryable across months.
 
-| 新增金额 | 本月累计 | 预期状态 | 原因 |
+| Added Amount | Monthly Total | Expected Status | Reason |
 | ---: | ---: | --- | --- |
-| 300 | 300 | NORMAL | 已用 20% |
-| 900 | 1200 | WARNING | 恰好达到 80% 预警线 |
-| 350 | 1550 | EXCEEDED | 超出预算 50 |
+| 300 | 300 | NORMAL | 20% used |
+| 900 | 1200 | WARNING | Reached the 80% warning threshold |
+| 350 | 1550 | EXCEEDED | Exceeded budget by 50 |
 
-金额按分录入，单笔录入与分类汇总共用预警判断。预算为 1500 时，1199.99 仍为 NORMAL，1500.01 已为 EXCEEDED；先根据金额判定状态，再格式化百分比。某类预算为零时，没有消费显示 NORMAL，新增正金额则全部计为超支；这时比例在 API 中为 `null`，页面显示 `N/A (zero budget)`。
+Amounts are recorded in minor currency units (cents), and single-entry evaluation shares the same status logic as category summaries. With a budget of 1500, 1199.99 remains NORMAL and 1500.01 is EXCEEDED; status is evaluated from amounts first before formatting percentages. When a category budget is zero, zero spending shows NORMAL, while any positive new expense is counted as exceeded, with `null` ratio in the API and `N/A (zero budget)` in the UI.
 
-也可以在启动本地后端后执行下列 PowerShell 命令。先在 `.env` 中给演示设置独立的 SQLite 文件，例如 `DATABASE_URL=sqlite:///./demo_expense.db`。后端启动后用这个文件保存演示记录。
+You can also run the following PowerShell snippet after starting the local backend. Set a dedicated SQLite file in `.env` first, such as `DATABASE_URL=sqlite:///./demo_expense.db`, so demo records are stored there.
 
-```powershell
 $demoRecords = Get-Content -Raw data/sample_data.json | ConvertFrom-Json
 foreach ($record in $demoRecords) {
     Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8001/expenses' -ContentType 'application/json' -Body ($record | ConvertTo-Json -Compress) |
         Select-Object updated_spent, status, over_amount
 }
-```
 
-| 业务接口 | 用途 |
+| Endpoint | Purpose |
 | --- | --- |
-| `POST /expenses` | 添加一笔消费，返回入库 ID、预算状态及超支额 |
-| `GET /expenses` | 倒序读取历史账目，可加 `?category=Food` |
-| `GET /expenses/{expense_id}` | 按 ID 取详情，缺失返回 404 |
-| `GET /summary` | 返回当月各类别累计金额、预算和状态，供图表使用 |
+| `POST /expenses` | Add an expense and return its persisted ID, budget status, and over-budget amount |
+| `GET /expenses` | Fetch historical expenses in reverse order, optionally filtered by `?category=Food` |
+| `GET /expenses/{expense_id}` | Fetch details by ID, returning 404 if missing |
+| `GET /summary` | Return current-month totals, budgets, and statuses by category for charts |
 
-## 4. 代码讲解与设计取舍
+## 4. Code Walkthrough and Design Trade-offs
 
-- **过程式**。在 [backend/main.py](backend/main.py) 中，`create_expense` 按查询本月累计、评估、写库及返回的顺序工作；[database/session.py](database/session.py) 中的 `get_db` 管理事务提交、回滚与关闭。
-- **函数式**。[processing/rules.py](processing/rules.py) 中的 `evaluate_budget_status` 和 `summarize_expenses_by_category` 只根据传入的数值与记录计算。固定输入会得到固定结果，可以用表中的数值直接检验。
-- **面向对象**。[processing/service.py](processing/service.py) 中的 `BudgetAdvisorService` 持有分类预算和预警线，提供单笔评估与分类汇总两种行为。FastAPI 通过依赖注入取得该服务。
+- **Procedural**. In [backend/main.py](backend/main.py), `create_expense` follows a sequential flow of querying monthly spend, evaluating status, persisting to the database, and returning the response; `get_db` in [database/session.py](database/session.py) manages transaction commit, rollback, and session closing.
+- **Functional**. `evaluate_budget_status` and `summarize_expenses_by_category` in [processing/rules.py](processing/rules.py) compute results purely from passed values and records. Deterministic inputs yield deterministic outputs that can be verified directly against the table above.
+- **Object-oriented**. `BudgetAdvisorService` in [processing/service.py](processing/service.py) holds category budgets and warning ratios, exposing single-expense evaluation and category summary methods. FastAPI obtains this service via dependency injection.
 
-**月份与历史**。本地修订按账目录入时间所属的 UTC 自然月计算。同一类别的上月记录仍可查；月初无需清表，也不依赖部署服务器的本地时区。这一做法没有提供按用户时区结账或补录消费日期的功能。
+**Months and history**. Monthly totals are grouped by the UTC calendar month of each expense's recorded timestamp. Prior-month entries for the same category remain queryable without wiping tables at month start or depending on server local time zones. This design does not support closing months by user time zone or backdating expense timestamps.
 
-**预警状态留档**。每笔账保存入账时的预警标签，概览依据当前预算重新汇总。预算调整后，历史详情仍能显示当时的标签。要完整还原触发原因，还需要当时的预算和预警线，当前表只保存账目与标签。恰好用完预算时显示 WARNING，超过预算才显示 EXCEEDED。
+**Persisted alert status**. Each expense stores the alert label evaluated when it was created, while the summary view recomputes status against current budgets. After a budget adjustment, item details still show the original label. Full historical reason reconstruction would also require storing historical budgets and warning ratios, whereas the table currently stores the expense and its label. Hitting the budget limit exactly yields WARNING, and exceeding it yields EXCEEDED.
 
-## 5. 测试与 CI 记录
+## 5. Tests and CI Records
 
-在项目根目录执行 `python -m pytest`（需使用项目虚拟环境）。[测试目录](tests/) 包含参数化预算规则测试、维护判断及 API 与隔离 SQLite 的集成测试。CI 工作流在 push 和 pull request 时安装固定依赖并运行同一命令。下文列出本地验证结果，并附已推送提交对应的公开 CI 运行。
+Run `python -m pytest` from the project root using the project virtual environment. The [test suite](tests/) covers parameterized budget rules, maintenance triggers, and API integration tests against isolated SQLite databases. CI runs on push and pull request events by installing pinned dependencies and executing the same test command. Local verification results and public CI runs for pushed commits are listed below.
 
-2026-11-23，已推送至 `main` 的提交 `778fdb4` 在本地 Python 3.11 上通过 34 项测试，另有 1 条依赖弃用提示。该提交覆盖月度预算、API 持久化与 SQLite 恢复，对应的 GitHub Actions 已完成并通过。[778fdb4 的 CI 运行](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45159557990)
+On 2026-11-23, commit `778fdb4` pushed to `main` passed 34 tests locally on Python 3.11 with 1 dependency deprecation warning, covering monthly budgets, API persistence, and SQLite recovery; its GitHub Actions run also passed. [CI run for 778fdb4](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45159557990)
 
-提交 `9c4da25` 的完整测试套件共 95 项，覆盖免费后端冷启动时的只读请求重试、维护完成后仍能触发的到期检查、控制器中断续跑和云端明确拒绝请求后的恢复。本机使用 SQLite 和独立的 PostgreSQL 16.16 运行，95 项通过。GitHub Actions 使用 Python 3.11 和 PostgreSQL 16 服务，运行同一套件并通过；PostgreSQL 写保护测试各自使用独立 schema。[9c4da25 的 CI 运行](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45165700440)
+Commit `9c4da25` passed all 95 tests in the full suite, covering read-only request retries during free-tier backend cold starts, due checks that still fire after maintenance completion, resuming interrupted controller runs, and recovery after explicit cloud request rejection. All 95 tests passed locally against SQLite and an isolated PostgreSQL 16.16 instance, and also passed in GitHub Actions using Python 3.11 and a PostgreSQL 16 service with per-test schemas for PostgreSQL write-guard tests. [CI run for 9c4da25](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45165700440)
 
-在独立的 `debug/ci-fault-demo` 分支，提交 `6132f4f` 将超支判断从 `usage_ratio > 1.0` 改为 `> 10.0`，使已有用例中累计 1010、预算 1000 的消费被判为 WARNING。提交 `970a536` 恢复原阈值，测试转绿。[故障运行](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45039678262) · [修复后运行](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45043678181) · [主线 6edba96 的运行](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45132165957)
+On the separate `debug/ci-fault-demo` branch, commit `6132f4f` changed the over-budget check from `usage_ratio > 1.0` to `> 10.0`, causing an existing case with 1010 spent against a 1000 budget to be classified as WARNING. Commit `970a536` restored the original threshold and returned tests to green. [Fault CI run](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45039678262) · [Post-fix CI run](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45043678181) · [Mainline 6edba96 CI run](https://github.com/Sunshine20051224/Little-Bear-Bookkeeping/actions/runs/45132165957)
 
-## 6. 云数据库与维护操作
+## 6. Cloud Database and Maintenance Operations
 
-### 6.1 两次线上持久性验证
+### 6.1 Two Online Persistence Checks
 
-**2026-11-23，切换到 Render Postgres 16 后，同一笔合成账目通过了后端重新部署验证。** 以下时间均为北京时间。
+**On 2026-11-23, after switching to Render Postgres 16, the same synthetic expense survived a backend redeployment.** Times below are in Beijing Time (UTC+8).
 
-| 数据库与时间 | 重新部署前 | 重新部署后 |
+| Database and Time | Before Redeploy | After Redeploy |
 | --- | --- | --- |
-| 临时 SQLite，18:48 | `Other` 合成消费 `id=1`，金额 1.23 | 同一提交 `6edba96` 重新部署后，按 ID 查询返回 404，账目列表为空，Other 的月累计降为 0。 |
-| Render Postgres 16，19:49–19:51 | 在部署 `dep-dc22fpmc6qcc73c7jjog` 通过 Web API 新增 `Food` 合成消费 `id=1`，金额 12.34 | 新部署 `dep-dc22gnnf3r2c73e520rg` 从同一数据库读回全部六个字段。Food 月累计仍为 12.34，预算 1500，状态 `NORMAL`，其他四类累计均为 0。 |
+| Ephemeral SQLite, 18:48 | `Other` synthetic expense `id=1`, amount `1.23` | After redeploying the same commit `6edba96`, querying by ID returned 404, the list was empty, and `Other` monthly spend dropped to `0`. |
+| Render Postgres 16, 19:49–19:51 | Added `Food` synthetic expense `id=1`, amount `12.34` via web API on deployment `dep-dc22fpmc6qcc73c7jjog` | New deployment `dep-dc22gnnf3r2c73e520rg` read back all six fields from the same database; `Food` monthly total remained `12.34` against budget `1500` (`NORMAL`), with the other four categories at `0`. |
 
-第一次检查时，免费 Web Service 通过项目默认设置把账目保存在临时 SQLite 文件。重新部署后，Streamlit 账目页和后端均显示空账本。19:47 再次确认 SQLite 为 0 条后，后端接入 Virginia 的免费 Render Postgres 16。第二次检查分别读取 `/expenses`、`/expenses/1` 和 PostgreSQL 原始行，并比较两次部署的 `/summary`。五个分类的所有预算字段一致。公开记录使用 SHA-256 摘要表示样本备注。[历史 SQLite 部署前记录](docs/evidence/persistence-before-20261123.json) · [历史 SQLite 部署后记录](docs/evidence/persistence-after-20261123.json) · [PostgreSQL 部署前后对照](docs/evidence/persistence-postgres-20261123.json)
+During the first check, the free web service stored data in an ephemeral SQLite file under default settings, resulting in an empty ledger in both Streamlit and the backend after redeployment. After confirming 0 SQLite rows at 19:47, the backend was connected to a free Render Postgres 16 instance in Virginia. The second check queried `/expenses`, `/expenses/1`, and raw PostgreSQL rows, and compared `/summary` across both deployments with matching budget fields across all five categories and SHA-256 digests used for sample notes in public records. [SQLite pre-redeploy record](docs/evidence/persistence-before-20261123.json) · [SQLite post-redeploy record](docs/evidence/persistence-after-20261123.json) · [PostgreSQL before/after comparison](docs/evidence/persistence-postgres-20261123.json)
 
-第二次重新部署后，在线 Streamlit 预算图正常载入。Food 合计 12.34，预算 1500，页面显示已用 0.8%。按 Food 筛选账本，仅显示一行，ID 为 1，金额 12.34，状态为 `NORMAL`，与后端读回结果一致。[前端观察与后端核对记录](docs/evidence/persistence-postgres-20261123.json)
+After the second redeployment, the online Streamlit budget chart loaded with `Food` at `12.34` out of `1500` (`0.8%` used), and filtering by `Food` showed a single row (`id=1`, amount `12.34`, status `NORMAL`) matching the backend readback. [Frontend observation and backend verification record](docs/evidence/persistence-postgres-20261123.json)
 
-本次保留了同一源库和合成样本。免费库的到期时间为 **2026-12-23 19:26（北京时间）**。课程要求第 6.5 节的真实云数据库替换、备份还原和旧库删除本次均未执行。维护实现及其本地验证见下文。[Render 免费数据库期限说明](https://render.com/docs/free)
+On 2026-11-28, a full cloud database replacement drill was completed under a single-instance quota (`DB_INSTANCE_LIMIT=1`). After local isolated trial-restore verification passed, the original source instance `dpg-dc225qk9v7es73c2bv50-a` was deleted with explicit authorization and the backend service switched to the new instance `dpg-dc5c10mc6qcc738gtvdg-a`. See Section 6.3 for drill details. [Render Free Database Lifecycle Docs](https://render.com/docs/free)
 
-### 6.2 只读诊断和定时检查
+### 6.2 Read-Only Diagnostics and Scheduled Checks
 
-在控制器电脑的私有 `.env` 填写 `RENDER_API_KEY`、后端 `RENDER_SERVICE_ID`。下列命令读取指定 Web Service 的数据库配置，仅输出数据库类型与可识别的提供商。若结果为 `unknown` 或服务上未找到该配置，需在服务及其环境组内核实。前端和 Render Dashboard 的域名都不能确定数据库托管方。
+Set `RENDER_API_KEY` and backend `RENDER_SERVICE_ID` in the controller's private `.env`. The command below inspects the specified web service's database configuration and outputs only the detected database type and provider (or `unknown` if unrecognized or missing on the service and its environment groups). Neither frontend nor Render Dashboard hostnames alone identify the database provider.
 
-```powershell
 .\venv\Scripts\python.exe -m maintenance.render_provider diagnose
-```
 
-当前云实例适配器支持 **Render Postgres**。确认实际数据库与资源权限后，在同一份私有配置中设置 `MAINTENANCE_PROVIDER=render-postgres`、`SOURCE_DB_ID`、`RENDER_OWNER_ID`，并将 `BACKEND_URL` 设为该已部署后端地址。控制器与后端应使用相同的分类预算和预警线。可在独立终端运行一次检查或连续监测。
+The cloud adapter currently supports **Render Postgres**. Once the actual database and resource permissions are verified, set `MAINTENANCE_PROVIDER=render-postgres`, `SOURCE_DB_ID`, and `RENDER_OWNER_ID` in the private config, and point `BACKEND_URL` to the deployed backend. Controller and backend should share the same category budgets and warning thresholds. Run a one-shot check or continuous watch in a separate terminal.
 
-```powershell
 .\venv\Scripts\python.exe -m maintenance.workflow check
 .\venv\Scripts\python.exe -m maintenance.workflow watch
-```
 
-`check` 执行一次异步查询；`watch` 按 `CHECK_INTERVAL_SECONDS` 定期查询活动实例，按 Ctrl+C 停止。统一入口 `start.py` 在配好 Render 监测条件后会自行启动只读 `watch`，无需再开第二个。未启用云监测时仍可运行本地记账演示。监测与应用启动均不授予替换或删除权限。
+`check` performs a single asynchronous check, while `watch` polls the active instance every `CHECK_INTERVAL_SECONDS` until stopped with Ctrl+C. The unified `start.py` entry point starts read-only `watch` automatically when Render monitoring variables are configured, without needing a second process. Local bookkeeping demos still work without cloud monitoring enabled, and neither monitoring nor app startup grants replacement or deletion authority.
 
-### 6.3 数据库替换流程（本次未执行）
+### 6.3 Database Replacement Workflow and Drill Record
 
-1. 选择只存放本演示合成数据的专用源实例，核对源、工作区与后端标识、源仍可读、网络权限、真实配额和备份主机空间。按实际情况设置 `TARGET_DB_PLAN`、`TARGET_DB_REGION`、`TARGET_DB_VERSION` 与 `DB_INSTANCE_LIMIT`（1 或 2）。若指定时刻演练，`MAINTENANCE_AT_UTC` 使用带偏移的 ISO 8601 时间，例如末尾为 `+00:00`；`MAINTENANCE_WAIT_SECONDS` 限制本次等候时间。后端须先部署支持数据库写保护的版本。云端另有业务数据或所用服务商与适配器不符时，应先确定相应的专用演示资源和课程认可的方案。
-2. 若只允许一个云实例，先在本机安装与源、目标相同主版本的 PostgreSQL，在 pgAdmin 中新建专用的**空数据库**，为仅用于此次试恢复的角色授予该库建表权限。将私有 `TRIAL_DATABASE_URL` 指向该库的 loopback 地址。控制器使用 `requirements.txt` 中固定的 `psycopg2-binary` 驱动，以 SQLAlchemy 和 JSON 完成备份还原。该实现无需安装 `pg_dump`。两实例路径在验证新库与切换成功后才删除旧库。[PostgreSQL Windows 安装入口](https://www.postgresql.org/download/windows/)
-3. 仅当负责人已授权对**指定源实例**执行替换及删除时，才执行下列命令。首次生成一次运行 ID，将其与三个经核实的资源 ID 留存。命令会与私有配置逐一匹配。
+1. Select a dedicated source instance containing only synthetic demo data, and verify source, workspace, and backend IDs, source readability, network permissions, real quota, and backup host disk space. Set `TARGET_DB_PLAN`, `TARGET_DB_REGION`, `TARGET_DB_VERSION`, and `DB_INSTANCE_LIMIT` (`1` or `2`) as needed. For time-triggered runs, `MAINTENANCE_AT_UTC` uses an offset-aware ISO 8601 timestamp (such as ending with `+00:00`), and `MAINTENANCE_WAIT_SECONDS` caps wait time. The backend must first run a version supporting database write protection.
+2. When only one cloud instance slot is allowed, install PostgreSQL locally with the same major version as the source and target, create a dedicated **empty database** locally (such as `little_bear_trial`), and point private `TRIAL_DATABASE_URL` to its loopback URL. The controller uses `psycopg2-binary` pinned in `requirements.txt` to back up and restore via SQLAlchemy and JSON without requiring `pg_dump`. Two-instance runs keep the source database until the new instance is verified and switched. [PostgreSQL Windows Installer](https://www.postgresql.org/download/windows/)
+3. Run the command below only when explicitly authorized to replace and delete the **specified source instance**. Generate a run ID on the first run and keep it together with the three verified resource IDs so they match the private configuration.
 
-```powershell
 $runId = [guid]::NewGuid().ToString()
-$sourceId = Read-Host '已获准替换及最终删除的数据库实例 ID'
-$backendId = Read-Host '已获准切换的 Render Web Service ID'
-$workspaceId = Read-Host '上述资源所在的工作区 ID'
+$sourceId = Read-Host 'Database instance ID authorized for replacement and final deletion'
+$backendId = Read-Host 'Render Web Service ID authorized for switchover'
+$workspaceId = Read-Host 'Workspace ID owning those resources'
 .\venv\Scripts\python.exe -m maintenance.workflow run --run-id $runId --authorize-source $sourceId --authorize-backend $backendId --authorize-workspace $workspaceId --authorize-delete $sourceId
-```
 
-`run` 检查维护触发条件并等待已进入的写事务完成，再阻止普通写入、备份当前账目。单实例模式必须先在隔离库还原最终备份并校验；两实例模式保留源库直到新库验证通过。控制器调用提供商 API 创建目标，记录实例 ID，还原并校验账目全部字段、同一参考月预算结果及下一条记录的 ID。随后更新后端数据库连接、检查部署完成，读取已部署 API，再在目标写入一笔带随机备注的受控记录、从该 API 按 ID 读回并清理。普通写入在维护期间返回 HTTP 503。成功的目标实例与核验状态持久化后才恢复正常写入。
+`run` checks maintenance trigger conditions, waits for in-flight write transactions to finish, blocks normal writes, and backs up current expenses. Single-slot mode must restore and verify the final backup in the isolated trial database first; two-slot mode retains the source until the target passes verification. The controller calls the provider API to create the target, records its instance ID, restores and verifies all expense fields, reference-month budget results, and the next record ID. It then updates the backend database connection, waits for deployment completion, queries the deployed API, writes a controlled probe record with a random note to the target, reads it back by ID via the API, and cleans it up. Normal writes return HTTP 503 during maintenance and resume only after target creation and verification states are persisted.
 
-**中断与日志。** 默认目录为控制器用户目录下的 `.little-bear-maintenance`，也可指定源库和后端之外的持久目录 `MAINTENANCE_STATE_DIR`。`state.json` 记录活动实例和当前阶段，`monitor.jsonl` 记录只读检查，`<运行ID>.jsonl` 记录本次演练，`backups/<运行ID>.json` 保存源标识、参考时间和当前账目。失败时先查看记录的阶段、最后事件和资源状态；保留备份、状态目录、预算设置与试恢复库。修正原因后，用**原运行 ID 和同一组资源 ID**再次执行上面的最后一条命令。创建结果不明时先核对该运行标记对应的资源，不能用新 ID 重试创建。源实例在取得最终备份前就已失联时，需另行授权从已有的已验证备份恢复，说明该备份之后可能遗漏的变更。
+**Interruptions and logs.** The default directory is `.little-bear-maintenance` under the controller user's home directory, or a separate directory outside the source and backend via `MAINTENANCE_STATE_DIR`. `state.json` tracks the active instance and current stage, `monitor.jsonl` logs read-only checks, `<run_id>.jsonl` logs the maintenance run, and `backups/<run_id>.json` stores source ID, reference time, and current expenses. On failure, inspect the recorded stage, last event, and resource state while keeping backups, state files, budget settings, and the trial database intact, then resume with the **same run ID and resource IDs**. If creation outcome is unclear, inspect the run-tagged resource first rather than retrying creation with a new ID.
 
-**课程证据。** 完成实际云演练后，选取同一运行 ID 的脱敏记录，将定时状态检查、备份时间及摘要、目标 ID、恢复验证、后端部署 ID、受控读写和最终活动 ID 一起链接在本节。原始备份包含账目，私有连接、令牌、网络白名单及状态目录不应整体提交。写锁、恢复、受控写入及主键生成已在本机 SQLite 和 PostgreSQL 16.16 中验证。第 6.1 节记录了线上同库重新部署的结果。[维护流程](maintenance/workflow.py) · [数据库与后端核验测试](tests/test_write_guard.py)
+**Course evidence (2026-11-28 live single-slot replacement drill).** Following sanitization guidelines, raw backup files, private connection strings, API tokens, and full state directories are not committed. Key redacted milestones from the completed run are recorded below ([workflow](maintenance/workflow.py) · [write-guard tests](tests/test_write_guard.py)):
 
-## 7. 数据、工具与扩展
+- **Run ID (`run_id`)**: `15250c95-c567-47be-877d-52f8c62820f4`
+- **Isolated trial restore**: Verified restore of 2 expenses and monthly budget summary against empty local PostgreSQL 16 database `little_bear_trial` (`trial_verified: true`, `restored_count: 2`, `contents_verified: true`, `monthly_rule_verified: true`)
+- **Source deletion and target creation**: Source `dpg-dc225qk9v7es73c2bv50-a` deleted (`source_deleted: true`), and new target `dpg-dc5c10mc6qcc738gtvdg-a` created and restored
+- **Backend cutover and probe verification**: Render service `srv-dc1lj4jl550s73erkk1g` switched to deployment `dep-dc5c1j8u01pc73873g90`, with readback and controlled write probe passing (`backend_read_verified: true`, `controlled_write_verified: true`, `probe_id: 4`)
+- **Final state**: `complete` (`maintenance_mode: false`), with `dpg-dc5c10mc6qcc738gtvdg-a` as the active instance
 
-账目来自用户手工录入，演示和测试均使用合成记录。三笔 Food 示例由本次课程核查编写，输入及其预期结果见第 3 节。项目采用 FastAPI、Streamlit、SQLAlchemy、Pydantic 与 HTTPX，云维护调用 Render 的服务和 Postgres 接口。[Render API 参考](https://api-docs.render.com/reference) · [项目依赖](requirements.txt)
+## 7. Data, Tools, and Extensions
 
-此次使用 OpenAI Codex 对照课程要求审查代码，辅助修订金额和月份逻辑，编写维护流程、测试、示例与文档。核验包括真实 API 和隔离数据库的读写比对、Streamlit 表单经本机 HTTP 新增消费、对照 GitHub Actions 故障与修复记录，以及在独立 PostgreSQL 中验证并发写锁、恢复与持久化。更早开发阶段的 AI 工具、外部代码和例子的使用情况由作者按实际经历补记。当前没有申报多线程、爬虫、邮件通知或 Docker 四项可选加分功能。
+Expenses are entered manually by users, and demos and tests use synthetic records. The three Food examples were written for this course review with inputs and expected outputs listed in Section 3. The project uses FastAPI, Streamlit, SQLAlchemy, Pydantic, and HTTPX, and calls Render service and Postgres APIs for cloud maintenance. [Render API Reference](https://api-docs.render.com/reference) · [Project Dependencies](requirements.txt)
 
-## 8. 提交与 15 分钟答辩
-
-答辩通常在第 13 周，另有考试期初的线上场次。以个人确认的场次为准，**最迟在答辩前 3 天**将 GitHub、Streamlit 和 Render 后端链接发送至 **kovacs.adam.eke@gmail.com**。从提交到答辩须保持仓库和应用可访问，私有仓库须在同一期限内授权教师访问；已计划的维护提前通知教师。演示前提前打开两个云应用。
-
-| 建议时长 | 演示与讲解 |
-| --- | --- |
-| 0–4 分钟 | 从 Streamlit 添加一笔合成消费，打开分类列表与预算图，说明前端 → `POST /expenses` → `BudgetAdvisorService` → SQLAlchemy → API 响应的一次完整数据流。 |
-| 4–8 分钟 | 打开 `create_expense`、`evaluate_budget_status` 和 `BudgetAdvisorService`，分别说明流程、纯函数、类的作用；选“为什么按 UTC 自然月结算并保留历史账目”说明设计取舍。 |
-| 8–11 分钟 | 展示已提交版本的 pytest、一次 CI 故障与对应修复，再用第 6.1 节的对照记录展示同一笔 PostgreSQL 账目跨两次后端部署保留，并说明课程第 6.5 节的实际进度。 |
-| 11–15 分钟 | 现场先预测边界行为，再用独立演示库或测试验证。例如预算 1500 时比较累计 1500 与 1500.01 的状态及超额，指出相应判断代码。 |
-
-### 英文提交邮件草稿
-
-```text
-To: kovacs.adam.eke@gmail.com
-Subject: Python project submission – Little Bear Bookkeeping – [Student name]
-
-Dear Ádám Kovács,
-
-I am submitting Little Bear Bookkeeping for the Multi-Paradigm Programming Languages practical course. The application records expenses and displays monthly spending against category budgets.
-
-GitHub repository: https://github.com/Sunshine20051224/Little-Bear-Bookkeeping
-Streamlit application: https://little-bear-bookkeeping-2ppuqrbguqmlayds7pcqkn.streamlit.app/
-Render backend (interactive API documentation): https://little-bear-bookkeeping.onrender.com/docs
-
-My presentation is scheduled for [date, time, and time zone].
-
-Kind regards,
-[Student name]
-```
+OpenAI Codex was used during this review against course requirements to assist with amount and month logic refinements, maintenance workflow, tests, examples, and documentation, alongside verification across real APIs and isolated databases, local HTTP Streamlit form submission, GitHub Actions failure/fix runs, and concurrent write locks, recovery, and persistence in PostgreSQL. Any AI tools, external code, or examples from earlier development stages should be noted according to actual usage. None of the four optional bonus features (multithreading, web scraping, email notifications, or Docker) are claimed.
